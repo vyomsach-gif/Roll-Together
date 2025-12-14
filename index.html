@@ -56,6 +56,10 @@
       75% { transform: rotate(5deg); }
     }
 
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     /* Header */
     .header {
       text-align: center;
@@ -80,6 +84,42 @@
       font-weight: 400;
       letter-spacing: 2px;
       text-transform: uppercase;
+    }
+
+    /* Loading State */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .loading-overlay.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 60px;
+      height: 60px;
+      border: 6px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+
+    .loading-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 32px;
+      color: white;
+      letter-spacing: 3px;
     }
 
     /* Create Button */
@@ -377,6 +417,22 @@
       font-size: 14px;
     }
 
+    /* Error Message */
+    .error-message {
+      background: #ff6b6b;
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      font-family: 'Archivo', sans-serif;
+      text-align: center;
+      display: none;
+    }
+
+    .error-message.show {
+      display: block;
+    }
+
     @media (max-width: 768px) {
       .form-row {
         grid-template-columns: 1fr;
@@ -389,12 +445,21 @@
   </style>
 </head>
 <body>
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text">LOADING RIDES...</div>
+  </div>
+
   <div class="container">
     <!-- Header -->
     <div class="header">
       <h1>ROLL TOGETHER</h1>
       <p>Connect • Coordinate • Cycle</p>
     </div>
+
+    <!-- Error Message -->
+    <div class="error-message" id="errorMessage"></div>
 
     <!-- Create Button -->
     <div class="create-button-container">
@@ -451,7 +516,29 @@
     </div>
   </div>
 
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
   <script>
+    // ========================================
+    // FIREBASE CONFIGURATION
+    // ========================================
+    const firebaseConfig = {
+      apiKey: "AIzaSyC9QhmRz6Lx9KqfwXTePaVUX0LBtmZQITA",
+      authDomain: "roll-together-f0184.firebaseapp.com",
+      databaseURL: "https://roll-together-f0184-default-rtdb.firebaseio.com",
+      projectId: "roll-together-f0184",
+      storageBucket: "roll-together-f0184.firebasestorage.app",
+      messagingSenderId: "294384191308",
+      appId: "1:294384191308:web:2bd4c808eae5db8eeb71e9",
+      measurementId: "G-KJTVCZYCY1"
+    };
+
+    // ========================================
+    // APP CODE
+    // ========================================
+    
     // SVG Icons
     const icons = {
       mapPin: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
@@ -459,24 +546,30 @@
       users: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>'
     };
 
-    // Load rides from localStorage
-    function loadRides() {
-      try {
-        const stored = localStorage.getItem('rollTogetherRides');
-        return stored ? JSON.parse(stored) : [];
-      } catch (error) {
-        console.error('Error loading rides:', error);
-        return [];
-      }
-    }
+    let database;
+    let ridesRef;
 
-    // Save rides to localStorage
-    function saveRides(rides) {
+    // Initialize Firebase
+    function initFirebase() {
       try {
-        localStorage.setItem('rollTogetherRides', JSON.stringify(rides));
+        firebase.initializeApp(firebaseConfig);
+        database = firebase.database();
+        ridesRef = database.ref('rides');
+        
+        // Listen for changes in real-time
+        ridesRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          renderRides(data);
+          document.getElementById('loadingOverlay').classList.add('hidden');
+        });
+
+        return true;
       } catch (error) {
-        console.error('Error saving rides:', error);
-        alert('Failed to save. Please try again.');
+        console.error('Firebase initialization error:', error);
+        document.getElementById('errorMessage').textContent = '⚠️ Error connecting to Firebase: ' + error.message;
+        document.getElementById('errorMessage').classList.add('show');
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        return false;
       }
     }
 
@@ -501,34 +594,26 @@
       event.preventDefault();
       
       const newRide = {
-        id: Date.now().toString(),
         title: document.getElementById('rideTitle').value,
         location: document.getElementById('rideLocation').value,
         date: document.getElementById('rideDate').value,
         time: document.getElementById('rideTime').value,
         creatorName: document.getElementById('creatorName').value,
         participants: [document.getElementById('creatorName').value],
-        createdAt: new Date().toISOString()
+        createdAt: Date.now()
       };
 
-      const rides = loadRides();
-      rides.push(newRide);
-      
-      // Sort by date/time
-      rides.sort((a, b) => {
-        const dateA = new Date(a.date + ' ' + a.time);
-        const dateB = new Date(b.date + ' ' + b.time);
-        return dateA - dateB;
-      });
-
-      saveRides(rides);
-      
-      // Reset form
-      document.getElementById('rideForm').reset();
-      toggleForm();
-      
-      // Render rides
-      renderRides();
+      // Push to Firebase
+      ridesRef.push(newRide)
+        .then(() => {
+          // Reset form
+          document.getElementById('rideForm').reset();
+          toggleForm();
+        })
+        .catch((error) => {
+          console.error('Error creating ride:', error);
+          alert('Failed to create ride. Please try again.');
+        });
     }
 
     // Join a ride
@@ -541,19 +626,25 @@
         return;
       }
 
-      const rides = loadRides();
-      const rideIndex = rides.findIndex(r => r.id === rideId);
-      
-      if (rideIndex !== -1) {
-        if (!rides[rideIndex].participants.includes(userName)) {
-          rides[rideIndex].participants.push(userName);
-          saveRides(rides);
+      // Get current ride data
+      ridesRef.child(rideId).once('value')
+        .then((snapshot) => {
+          const ride = snapshot.val();
+          if (ride && !ride.participants.includes(userName)) {
+            ride.participants.push(userName);
+            // Update in Firebase
+            return ridesRef.child(rideId).update({ participants: ride.participants });
+          } else if (ride && ride.participants.includes(userName)) {
+            alert('You have already joined this ride!');
+          }
+        })
+        .then(() => {
           document.getElementById(inputId).value = '';
-          renderRides();
-        } else {
-          alert('You have already joined this ride!');
-        }
-      }
+        })
+        .catch((error) => {
+          console.error('Error joining ride:', error);
+          alert('Failed to join ride. Please try again.');
+        });
     }
 
     // Format date
@@ -567,11 +658,10 @@
     }
 
     // Render all rides
-    function renderRides() {
-      const rides = loadRides();
+    function renderRides(ridesData) {
       const grid = document.getElementById('ridesGrid');
       
-      if (rides.length === 0) {
+      if (!ridesData || Object.keys(ridesData).length === 0) {
         grid.innerHTML = `
           <div class="empty-state">
             <h3>NO RIDES YET</h3>
@@ -581,7 +671,19 @@
         return;
       }
 
-      grid.innerHTML = rides.map((ride, index) => `
+      // Convert to array and sort
+      const ridesArray = Object.entries(ridesData).map(([id, ride]) => ({
+        id,
+        ...ride
+      }));
+
+      ridesArray.sort((a, b) => {
+        const dateA = new Date(a.date + ' ' + a.time);
+        const dateB = new Date(b.date + ' ' + b.time);
+        return dateA - dateB;
+      });
+
+      grid.innerHTML = ridesArray.map((ride, index) => `
         <div class="ride-card" style="animation-delay: ${index * 0.1}s">
           <h3>${ride.title}</h3>
           
@@ -625,7 +727,7 @@
     }
 
     // Initialize on page load
-    renderRides();
+    initFirebase();
   </script>
 </body>
 </html>
